@@ -23,7 +23,6 @@ import type {
 
 const STORAGE_KEY = "kreator_marki_pracodawcy_history_v1";
 const PLAN_MODEL = "gemini-3.5-flash-lite";
-const IMAGE_MODEL = "gemini-2.5-flash-image";
 
 const TYPOGRAPHY_ENGLISH_MAP: Record<string, string> = {
   "Nowoczesny Grotesk":
@@ -118,122 +117,39 @@ export default function App() {
     }
   }, [savedCampaigns]);
 
-  const requestMediumImage = async (params: {
+  const preparePromptCard = (params: {
     kind: MediaKind;
     prompt: string;
-    aspectRatio: "4:3" | "16:9" | "3:4";
     artDirectionLock: string;
-    referenceImageBase64?: string | null;
-    referenceMimeType?: string;
     refinementNote?: string;
   }) => {
+    let fullPrompt = params.prompt.trim();
+    if (params.artDirectionLock?.trim()) {
+      fullPrompt += `\n\nBrand Visual DNA: ${params.artDirectionLock.trim()}`;
+    }
+    if (params.refinementNote?.trim()) {
+      fullPrompt += `\n\nDodatkowa uwaga: ${params.refinementNote.trim()}`;
+    }
+
     setAssets((prev) => ({
       ...prev,
       [params.kind]: {
         ...prev[params.kind],
-        status: "generating",
-        errorMessage: undefined,
-        prompt: params.prompt,
+        imageUrl: null,
+        base64Data: null,
+        status: "error",
+        errorMessage:
+          "Darmowy klucz API Google ogranicza automatyczne generowanie obrazów (limit: 0). Gotowy prompt z pełną identyfikacją wizualną znajduje się w sekcji spójności marki poniżej — skopiuj go i wklej bezpośrednio w czacie Gemini.",
+        prompt: fullPrompt,
+        isStarterAsset: false,
       },
     }));
-
-    try {
-      const ai = getGeminiClient();
-      const parts: Array<
-        { text: string } | { inlineData: { data: string; mimeType: string } }
-      > = [];
-
-      let finalPrompt = params.prompt.trim();
-      if (params.artDirectionLock?.trim()) {
-        finalPrompt += `\n\nSTRICT BRAND VISUAL DNA LOCK: ${params.artDirectionLock.trim()}`;
-      }
-      finalPrompt +=
-        "\n\nANTI-STOCK REALISM DIRECTIVE: Depict authentic, diverse contemporary professionals genuinely absorbed in collaborative work in a real modern office. Natural unposed expressions, subtle 35mm documentary depth and daylight, zero cheesy posed camera smiles.";
-
-      if (params.refinementNote?.trim()) {
-        finalPrompt += `\n\nUSER CREATIVE ADJUSTMENT: ${params.refinementNote.trim()}`;
-      }
-
-      if (params.referenceImageBase64 && params.referenceMimeType) {
-        parts.push({
-          inlineData: {
-            data: params.referenceImageBase64,
-            mimeType: params.referenceMimeType,
-          },
-        });
-        finalPrompt =
-          `BRAND COHESION REFERENCE: Preserve the exact brand color palette, graphic identity, typography style, and workplace aesthetic from the attached master visual while adapting it to the new medium (${params.kind}).\n\n` +
-          finalPrompt;
-      }
-
-      parts.push({ text: finalPrompt });
-
-      const response = await callWithRetry(() =>
-        ai.models.generateContent({
-          model: IMAGE_MODEL,
-          contents: { parts },
-          config: {
-            imageConfig: {
-              aspectRatio: params.aspectRatio || "4:3",
-            },
-          },
-        })
-      );
-
-      let imageUrl: string | null = null;
-      let mimeType = "image/png";
-      let base64Data: string | null = null;
-
-      for (const part of response.candidates?.[0]?.content?.parts ?? []) {
-        if (part.inlineData?.data) {
-          base64Data = part.inlineData.data;
-          mimeType = part.inlineData.mimeType ?? "image/png";
-          imageUrl = `data:${mimeType};base64,${base64Data}`;
-        }
-      }
-
-      if (!imageUrl || !base64Data) {
-        throw new Error(
-          "Model obrazowy nie zwrócił grafiki dla tego ujęcia. Spróbuj ponownie."
-        );
-      }
-
-      setAssets((prev) => ({
-        ...prev,
-        [params.kind]: {
-          ...prev[params.kind],
-          imageUrl,
-          base64Data,
-          mimeType,
-          status: "ready",
-          errorMessage: undefined,
-          prompt: params.prompt,
-          isStarterAsset: false,
-        },
-      }));
-
-      return { imageUrl, base64Data, mimeType };
-    } catch (err) {
-      const errMsg =
-        err instanceof Error
-          ? err.message
-          : "Nie udało się wygenerować obrazu w modelu AI.";
-      setAssets((prev) => ({
-        ...prev,
-        [params.kind]: {
-          ...prev[params.kind],
-          status: "error",
-          errorMessage: errMsg,
-        },
-      }));
-      throw new Error(errMsg);
-    }
   };
 
   const handleGenerateCampaign = async () => {
     setGlobalError(null);
     setIsGenerating(true);
-    setGenerationStep("1/4 · Opracowywanie strategii i DNA marki...");
+    setGenerationStep("1/2 · Opracowywanie strategii, haseł i posta...");
 
     try {
       if (!brief?.companyName?.trim() || !brief?.description?.trim()) {
@@ -342,86 +258,25 @@ ZASADY KRYTYCZNE DLA SPÓJNOŚCI WIZUALNEJ:
       };
       setSavedCampaigns((prev) => [record, ...prev].slice(0, 6));
 
-      setAssets((prev) => ({
-        linkedin: {
-          ...prev.linkedin,
-          status: "generating",
-          errorMessage: undefined,
-          prompt: nextPlan.prompts.linkedin,
-        },
-        billboard: {
-          ...prev.billboard,
-          status: "generating",
-          errorMessage: undefined,
-          prompt: nextPlan.prompts.billboard,
-        },
-        officeBanner: {
-          ...prev.officeBanner,
-          status: "generating",
-          errorMessage: undefined,
-          prompt: nextPlan.prompts.officeBanner,
-        },
-      }));
+      setGenerationStep("2/2 · Przygotowywanie promptów wizualnych...");
 
-      setGenerationStep("2/4 · Nano-Banana: post na LinkedIn...");
-      let anchorRef: { base64Data: string; mimeType: string } | null = null;
-      try {
-        const linkedinResult = await requestMediumImage({
-          kind: "linkedin",
-          prompt: nextPlan.prompts.linkedin,
-          aspectRatio: "4:3",
-          artDirectionLock: nextPlan.artDirectionLock,
-        });
-        anchorRef = {
-          base64Data: linkedinResult.base64Data,
-          mimeType: linkedinResult.mimeType,
-        };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setGlobalError(msg);
-        setAssets((prev) => ({
-          ...prev,
-          billboard: {
-            ...prev.billboard,
-            status: "error",
-            errorMessage: msg,
-          },
-          officeBanner: {
-            ...prev.officeBanner,
-            status: "error",
-            errorMessage: msg,
-          },
-        }));
-        return;
-      }
+      preparePromptCard({
+        kind: "linkedin",
+        prompt: nextPlan.prompts.linkedin,
+        artDirectionLock: nextPlan.artDirectionLock,
+      });
 
-      setGenerationStep("3/4 · Nano-Banana: billboard miejski...");
-      try {
-        await requestMediumImage({
-          kind: "billboard",
-          prompt: nextPlan.prompts.billboard,
-          aspectRatio: "16:9",
-          artDirectionLock: nextPlan.artDirectionLock,
-          referenceImageBase64: anchorRef?.base64Data,
-          referenceMimeType: anchorRef?.mimeType,
-        });
-      } catch (err) {
-        setGlobalError(err instanceof Error ? err.message : String(err));
-      }
+      preparePromptCard({
+        kind: "billboard",
+        prompt: nextPlan.prompts.billboard,
+        artDirectionLock: nextPlan.artDirectionLock,
+      });
 
-      setGenerationStep("4/4 · Nano-Banana: baner powitalny w biurze...");
-      try {
-        await requestMediumImage({
-          kind: "officeBanner",
-          prompt: nextPlan.prompts.officeBanner,
-          aspectRatio: "3:4",
-          artDirectionLock: nextPlan.artDirectionLock,
-          referenceImageBase64: anchorRef?.base64Data,
-          referenceMimeType: anchorRef?.mimeType,
-        });
-      } catch (err) {
-        setGlobalError(err instanceof Error ? err.message : String(err));
-      }
+      preparePromptCard({
+        kind: "officeBanner",
+        prompt: nextPlan.prompts.officeBanner,
+        artDirectionLock: nextPlan.artDirectionLock,
+      });
     } catch (err) {
       setGlobalError(
         err instanceof Error
@@ -440,29 +295,14 @@ ZASADY KRYTYCZNE DLA SPÓJNOŚCI WIZUALNEJ:
   ) => {
     setGlobalError(null);
     const targetAsset = assets[kind];
-    const anchorAsset =
-      kind !== "linkedin" && assets.linkedin.base64Data
-        ? assets.linkedin
-        : null;
+    setIsStarterPreview(false);
 
-    try {
-      setIsStarterPreview(false);
-      await requestMediumImage({
-        kind,
-        prompt: targetAsset.prompt || plan.prompts[kind],
-        aspectRatio: targetAsset.aspectRatio,
-        artDirectionLock: plan.artDirectionLock,
-        referenceImageBase64: anchorAsset?.base64Data ?? null,
-        referenceMimeType: anchorAsset?.mimeType,
-        refinementNote,
-      });
-    } catch (err) {
-      setGlobalError(
-        err instanceof Error
-          ? err.message
-          : "Nie udało się ponownie wygenerować ujęcia."
-      );
-    }
+    preparePromptCard({
+      kind,
+      prompt: targetAsset.prompt || plan.prompts[kind],
+      artDirectionLock: plan.artDirectionLock,
+      refinementNote,
+    });
   };
 
   const handleDownloadAsset = (asset: MediaAssetState) => {
@@ -558,8 +398,8 @@ ZASADY KRYTYCZNE DLA SPÓJNOŚCI WIZUALNEJ:
             <p className="text-sm sm:text-base text-[#5B6472] mt-3 leading-relaxed">
               Opisz kulturę firmy, propozycję wartości (EVP) lub wybrane
               stanowisko. Narzędzie przełoży brief na jednolitą identyfikację
-              wizualną i wygeneruje realistyczne ujęcia w modelu Nano-Banana —
-              bez sztucznych póz stockowych.
+              wizualną, gotowy post na LinkedIn oraz precyzyjne prompty
+              graficzne dla każdego kanału.
             </p>
           </div>
 
