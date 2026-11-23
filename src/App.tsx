@@ -23,7 +23,7 @@ import type {
 
 const STORAGE_KEY = "kreator_marki_pracodawcy_history_v1";
 const PLAN_MODEL = "gemini-3.5-flash-lite";
-const IMAGE_MODEL = "gemini-3.1-flash-lite-image";
+const IMAGE_MODEL = "gemini-2.5-flash-image";
 
 const TYPOGRAPHY_ENGLISH_MAP: Record<string, string> = {
   "Nowoczesny Grotesk":
