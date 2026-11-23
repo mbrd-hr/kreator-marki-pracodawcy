@@ -22,7 +22,7 @@ import type {
 } from "./types/campaign";
 
 const STORAGE_KEY = "kreator_marki_pracodawcy_history_v1";
-const PLAN_MODEL = "gemini-3.8-flash-lite";
+const PLAN_MODEL = "gemini-3.8-flash";
 const IMAGE_MODEL = "gemini-3.1-flash-lite-image";
 
 const TYPOGRAPHY_ENGLISH_MAP: Record<string, string> = {
@@ -60,6 +60,24 @@ function getGeminiClient(): GoogleGenAI {
     );
   }
   return new GoogleGenAI({ apiKey });
+}
+
+async function callWithRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isTemporary =
+        msg.includes("503") ||
+        msg.includes("UNAVAILABLE") ||
+        msg.includes("high demand") ||
+        msg.includes("429");
+      if (!isTemporary || i === retries) throw err;
+      await new Promise((r) => setTimeout(r, 2500 * (i + 1)));
+    }
+  }
+  throw new Error("Przekroczono limit ponownych prób połączenia.");
 }
 
 function loadSavedHistory(): SavedCampaignSummary[] {
@@ -150,15 +168,17 @@ export default function App() {
 
       parts.push({ text: finalPrompt });
 
-      const response = await ai.models.generateContent({
-        model: IMAGE_MODEL,
-        contents: { parts },
-        config: {
-          imageConfig: {
-            aspectRatio: params.aspectRatio || "4:3",
+      const response = await callWithRetry(() =>
+        ai.models.generateContent({
+          model: IMAGE_MODEL,
+          contents: { parts },
+          config: {
+            imageConfig: {
+              aspectRatio: params.aspectRatio || "4:3",
+            },
           },
-        },
-      });
+        })
+      );
 
       let imageUrl: string | null = null;
       let mimeType = "image/png";
@@ -261,42 +281,44 @@ ZASADY KRYTYCZNE DLA SPÓJNOŚCI WIZUALNEJ:
 4. Post na LinkedIn ("linkedinPost") napisz po polsku: konkretny, ludzki, z 3 krótkimi akapitami, wyraźnym CTA i 4 trafnymi hashtagami.
 `;
 
-      const planResponse = await ai.models.generateContent({
-        model: PLAN_MODEL,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              headline: { type: Type.STRING },
-              subheadline: { type: Type.STRING },
-              welcomeMessage: { type: Type.STRING },
-              linkedinPost: { type: Type.STRING },
-              brandVoiceSummary: { type: Type.STRING },
-              artDirectionLock: { type: Type.STRING },
-              prompts: {
-                type: Type.OBJECT,
-                properties: {
-                  linkedin: { type: Type.STRING },
-                  billboard: { type: Type.STRING },
-                  officeBanner: { type: Type.STRING },
+      const planResponse = await callWithRetry(() =>
+        ai.models.generateContent({
+          model: PLAN_MODEL,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                headline: { type: Type.STRING },
+                subheadline: { type: Type.STRING },
+                welcomeMessage: { type: Type.STRING },
+                linkedinPost: { type: Type.STRING },
+                brandVoiceSummary: { type: Type.STRING },
+                artDirectionLock: { type: Type.STRING },
+                prompts: {
+                  type: Type.OBJECT,
+                  properties: {
+                    linkedin: { type: Type.STRING },
+                    billboard: { type: Type.STRING },
+                    officeBanner: { type: Type.STRING },
+                  },
+                  required: ["linkedin", "billboard", "officeBanner"],
                 },
-                required: ["linkedin", "billboard", "officeBanner"],
               },
+              required: [
+                "headline",
+                "subheadline",
+                "welcomeMessage",
+                "linkedinPost",
+                "brandVoiceSummary",
+                "artDirectionLock",
+                "prompts",
+              ],
             },
-            required: [
-              "headline",
-              "subheadline",
-              "welcomeMessage",
-              "linkedinPost",
-              "brandVoiceSummary",
-              "artDirectionLock",
-              "prompts",
-            ],
           },
-        },
-      });
+        })
+      );
 
       const rawText = (planResponse.text ?? "").trim();
       if (!rawText) {
