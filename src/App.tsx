@@ -24,26 +24,26 @@ import type {
 const STORAGE_KEY = "kreator_marki_pracodawcy_history_v1";
 const PLAN_MODEL = "gemini-3.5-flash-lite";
 
-const TYPOGRAPHY_ENGLISH_MAP: Record<string, string> = {
+const TYPOGRAPHY_POLISH_MAP: Record<string, string> = {
   "Nowoczesny Grotesk":
-    "bold geometric Swiss neo-grotesque sans-serif typography, clean crisp tracking, confident architectural hierarchy",
+    "wyrazista, geometryczna typografia bezszeryfowa w szwajcarskim stylu neogroteskowym, czyste światło między znakami, pewna architektoniczna hierarchia",
   "Redakcyjny Szeryf":
-    "refined high-contrast modern editorial serif display typography paired with clean humanist sans-serif captions",
+    "szlachetna, kontrastowa nowoczesna typografia szeryfowa w nagłówkach połączona z czytelnym humanistycznym krojem bezszeryfowym",
   "Techniczny Geometryczny":
-    "sharp modular geometric sans-serif display type with structured Swiss grid alignment and crisp technical spacing",
+    "ostry, modułowy geometryczny krój bezszeryfowy oparty na uporządkowanej siatce szwajcarskiej i precyzyjnych odstępach",
   "Humanistyczny Minimalizm":
-    "warm, approachable minimalist humanist sans-serif typography with generous whitespace and balanced legibility",
+    "ciepła, przystępna minimalistyczna humanistyczna typografia bezszeryfowa z dużą ilością białej przestrzeni i wysoką czytelnością",
 };
 
-const WORKPLACE_ENGLISH_MAP: Record<string, string> = {
+const WORKPLACE_POLISH_MAP: Record<string, string> = {
   "Jasne biuro loftowe":
-    "sunlit contemporary European industrial-loft office with tall steel-framed windows, warm brick accents, oak worktables, and indoor plants",
+    "jasne, współczesne europejskie biuro w stylu industrialnego loftu z wysokimi oknami w stalowych ramach, ciepłą cegłą, dębowymi stołami i roślinami doniczkowymi",
   "Studio z drewnem i zielenią":
-    "bright Scandinavian-inspired architectural studio with pale oak timber slats, glass meeting rooms, abundant botanical greenery, and soft natural daylight",
+    "jasne studio w stylu skandynawskim z lamelami z jasnego dębu, przeszklonymi salkami spotkań, bujną zielenią i miękkim naturalnym światłem dziennym",
   "Laboratorium R&D ze szkłem":
-    "modern high-craft R&D innovation center with clean glass partitions, brushed aluminum fixtures, minimalist benches, prototyping tools, and crisp daylight",
+    "nowoczesne centrum innowacji i R&D z czystymi szklanymi przegrodami, detalami ze szczotkowanego aluminium, minimalistycznymi stanowiskami i naturalnym światłem",
   "Skandynawski open-space z tarasem":
-    "airy minimalist modern workspace opening onto a green urban terrace, natural concrete floors, acoustic wood panels, warm afternoon light",
+    "przestronne, minimalistyczne nowoczesne biuro otwierające się na zielony miejski taras, naturalne betonowe posadzki, drewniane panele akustyczne i ciepłe popołudniowe światło",
 };
 
 function getGeminiClient(): GoogleGenAI {
@@ -124,8 +124,11 @@ export default function App() {
     refinementNote?: string;
   }) => {
     let fullPrompt = params.prompt.trim();
-    if (params.artDirectionLock?.trim()) {
-      fullPrompt += `\n\nBrand Visual DNA: ${params.artDirectionLock.trim()}`;
+    if (
+      params.artDirectionLock?.trim() &&
+      !fullPrompt.includes("Spójność wizualna marki:")
+    ) {
+      fullPrompt += `\n\nSpójność wizualna marki: ${params.artDirectionLock.trim()}`;
     }
     if (params.refinementNote?.trim()) {
       fullPrompt += `\n\nDodatkowa uwaga: ${params.refinementNote.trim()}`;
@@ -139,7 +142,7 @@ export default function App() {
         base64Data: null,
         status: "error",
         errorMessage:
-          "Darmowy klucz API Google ogranicza automatyczne generowanie obrazów (limit: 0). Gotowy prompt z pełną identyfikacją wizualną znajduje się w sekcji spójności marki poniżej — skopiuj go i wklej bezpośrednio w czacie Gemini.",
+          "Darmowy klucz API Google ogranicza automatyczne generowanie obrazów (limit: 0). Gotowy prompt po polsku z pełną identyfikacją wizualną znajduje się w sekcji spójności marki poniżej — skopiuj go i wklej bezpośrednio w czacie Gemini.",
         prompt: fullPrompt,
         isStarterAsset: false,
       },
@@ -166,12 +169,12 @@ export default function App() {
             ? "Propozycja wartości dla pracownika (EVP)"
             : `Rekrutacja na konkretne stanowisko: ${brief.roleTitle || "Specjalista"}`;
 
-      const typoEng =
-        TYPOGRAPHY_ENGLISH_MAP[brief.typographyStyle] ??
-        TYPOGRAPHY_ENGLISH_MAP["Nowoczesny Grotesk"];
-      const workplaceEng =
-        WORKPLACE_ENGLISH_MAP[brief.workplaceVibe] ??
-        WORKPLACE_ENGLISH_MAP["Studio z drewnem i zielenią"];
+      const typoDesc =
+        TYPOGRAPHY_POLISH_MAP[brief.typographyStyle] ??
+        TYPOGRAPHY_POLISH_MAP["Nowoczesny Grotesk"];
+      const workplaceDesc =
+        WORKPLACE_POLISH_MAP[brief.workplaceVibe] ??
+        WORKPLACE_POLISH_MAP["Studio z drewnem i zielenią"];
 
       const prompt = `
 Jesteś dyrektorem kreatywnym i strategiem employer brandingu (EB) w topowym europejskim studiu projektowym.
@@ -183,18 +186,22 @@ ${brief.roleTitle ? `- Stanowisko: ${brief.roleTitle.trim()}` : ""}
 - Opis kultury / EVP / stanowiska: ${brief.description.trim()}
 - Główny kolor marki (HEX): ${brief.primaryColor}
 - Kolor uzupełniający / akcent (HEX): ${brief.secondaryColor}
-- Styl typografii: ${brief.typographyStyle} (${typoEng})
-- Klimat miejsca pracy: ${brief.workplaceVibe} (${workplaceEng})
+- Styl typografii: ${brief.typographyStyle} (${typoDesc})
+- Klimat miejsca pracy: ${brief.workplaceVibe} (${workplaceDesc})
 ${brief.customHeadline?.trim() ? `- Preferowane hasło użytkownika (użyj go jako headline): ${brief.customHeadline.trim()}` : "- Brak narzuconego hasła — stwórz krótkie, autentyczne polskie hasło (maks. 5 słów), zero korporacyjnych klisz typu 'dynamiczny zespół'."}
 
-ZASADY KRYTYCZNE DLA SPÓJNOŚCI WIZUALNEJ:
-1. Wszystkie 3 prompty obrazowe (linkedin, billboard, officeBanner) MUSZĄ być napisane po ANGIELSKU, ale cytowane napisy na kreacjach (nazwa firmy "${brief.companyName.trim()}", hasło główne, powitanie w biurze) MUSZĄ być dokładnie po POLSKU z poprawnymi polskimi znakami.
-2. Wszystkie 3 obrazy muszą wyglądać jak jedna kampania tej samej marki: paleta ${brief.primaryColor} i ${brief.secondaryColor}, styl typografii ${typoEng}, klimat ${workplaceEng}, autentyczna fotografia dokumentalna 35mm, naturalne światło dzienne, zróżnicowani profesjonaliści przy prawdziwej pracy, zero sztucznych póz stockowych.
-3. Specyfika mediów:
-  - "linkedin": Editorial recruitment campaign graphic (4:3) for LinkedIn feed with brand framing in ${brief.primaryColor}, displaying "${brief.companyName.trim()}" and Polish headline.
-  - "billboard": Wide architectural street-level photograph (16:9) of a modern urban city billboard along a sunlit European boulevard displaying the cohesive campaign creative.
-  - "officeBanner": Architectural interior photograph (3:4) of a sunlit modern reception lobby featuring a tall freestanding welcome banner displaying "${brief.companyName.trim()}" and Polish welcome message.
-4. Post na LinkedIn ("linkedinPost") napisz po polsku: konkretny, ludzki, z 3 krótkimi akapitami, wyraźnym CTA i 4 trafnymi hashtagami.
+ZASADY KRYTYCZNE DLA CAŁEJ ODPOWIEDZI:
+1. Cała odpowiedź — w tym "artDirectionLock" oraz wszystkie 3 prompty obrazowe ("linkedin", "billboard", "officeBanner") — MUSI być napisana w całości po POLSKU, naturalnym, precyzyjnym językiem dyrektora artystycznego, gotowym do skopiowania i wklejenia do generatora obrazów Gemini.
+2. Wszystkie 3 obrazy muszą wyglądać jak jedna kampania tej samej marki:
+  - Paleta kolorów: kolor główny ${brief.primaryColor}, kolor uzupełniający ${brief.secondaryColor}, jasne neutralne tła.
+  - Typografia: ${typoDesc}.
+  - Klimat wnętrza: ${workplaceDesc}.
+  - Styl fotografii: autentyczna fotografia dokumentalna 35mm, miękkie naturalne światło dzienne, zróżnicowani profesjonaliści pochłonięci prawdziwą współpracą przy laptopach i notatkach — zero sztucznych uśmiechów i póz rodem z banków zdjęć.
+3. Specyfika 3 nośników (wszystkie napisy widoczne na kreacjach muszą być po polsku z poprawnymi polskimi znakami):
+  - "linkedin": Grafika rekrutacyjna (format 4:3) na LinkedIn z oprawą marki w kolorze ${brief.primaryColor}, wyświetlająca nazwę "${brief.companyName.trim()}" oraz polskie hasło główne${brief.roleTitle ? ` i nazwę stanowiska "${brief.roleTitle.trim()}"` : ""}.
+  - "billboard": Szeroki architektoniczny kadr uliczny (format 16:9) przedstawiający nowoczesny wielkoformatowy billboard miejski przy słonecznej europejskiej alei, na którym widnieje ta sama spójna kreacja kampanii z nazwą "${brief.companyName.trim()}" i polskim hasłem głównym.
+  - "officeBanner": Architektoniczne zdjęcie wnętrza (format 3:4) jasnej recepcji biurowej w opisanym klimacie, z wolnostojącym pionowym banerem powitalnym w kolorach marki, wyświetlającym nazwę "${brief.companyName.trim()}" oraz polskie hasło powitalne (np. "Witaj w zespole").
+4. Post na LinkedIn ("linkedinPost") napisz po polsku: konkretny, ludzki, bez patosu i zbędnych emoji, z 3 krótkimi akapitami, wyraźnym CTA i 4 trafnymi hashtagami.
 `;
 
       const planResponse = await callWithRetry(() =>
@@ -211,13 +218,29 @@ ZASADY KRYTYCZNE DLA SPÓJNOŚCI WIZUALNEJ:
                 welcomeMessage: { type: Type.STRING },
                 linkedinPost: { type: Type.STRING },
                 brandVoiceSummary: { type: Type.STRING },
-                artDirectionLock: { type: Type.STRING },
+                artDirectionLock: {
+                  type: Type.STRING,
+                  description:
+                    "Zwięzła specyfikacja DNA wizualnego marki po polsku (kolory HEX, typografia, styl fotografii dokumentalnej i klimat biura).",
+                },
                 prompts: {
                   type: Type.OBJECT,
                   properties: {
-                    linkedin: { type: Type.STRING },
-                    billboard: { type: Type.STRING },
-                    officeBanner: { type: Type.STRING },
+                    linkedin: {
+                      type: Type.STRING,
+                      description:
+                        "Szczegółowy prompt po polsku do wygenerowania grafiki rekrutacyjnej 4:3 na LinkedIn.",
+                    },
+                    billboard: {
+                      type: Type.STRING,
+                      description:
+                        "Szczegółowy prompt po polsku do wygenerowania zdjęcia 16:9 z billboardem miejskim.",
+                    },
+                    officeBanner: {
+                      type: Type.STRING,
+                      description:
+                        "Szczegółowy prompt po polsku do wygenerowania zdjęcia 3:4 z banerem powitalnym w recepcji biura.",
+                    },
                   },
                   required: ["linkedin", "billboard", "officeBanner"],
                 },
@@ -294,12 +317,11 @@ ZASADY KRYTYCZNE DLA SPÓJNOŚCI WIZUALNEJ:
     refinementNote?: string
   ) => {
     setGlobalError(null);
-    const targetAsset = assets[kind];
     setIsStarterPreview(false);
 
     preparePromptCard({
       kind,
-      prompt: targetAsset.prompt || plan.prompts[kind],
+      prompt: plan.prompts[kind],
       artDirectionLock: plan.artDirectionLock,
       refinementNote,
     });
