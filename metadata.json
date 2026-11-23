@@ -1,0 +1,6 @@
+{
+  "name": "Kreator Marki Pracodawcy",
+  "description": "Studio wizualizacji spójnych kampanii employer brandingowych na LinkedIn, billboardy miejskie i banery powitalne w biurze.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
