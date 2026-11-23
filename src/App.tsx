@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowUpRight, RotateCcw, X } from "lucide-react";
+import { GoogleGenAI, Type } from "@google/genai";
 import { BrandCohesionSheet } from "./components/BrandCohesionSheet";
 import { BriefPanel } from "./components/BriefPanel";
 import { CampaignStage } from "./components/CampaignStage";
@@ -21,6 +22,45 @@ import type {
 } from "./types/campaign";
 
 const STORAGE_KEY = "kreator_marki_pracodawcy_history_v1";
+const PLAN_MODEL = "gemini-2.5-flash";
+const IMAGE_MODEL = "gemini-2.5-flash-image";
+
+const TYPOGRAPHY_ENGLISH_MAP: Record<string, string> = {
+  "Nowoczesny Grotesk":
+    "bold geometric Swiss neo-grotesque sans-serif typography, clean crisp tracking, confident architectural hierarchy",
+  "Redakcyjny Szeryf":
+    "refined high-contrast modern editorial serif display typography paired with clean humanist sans-serif captions",
+  "Techniczny Geometryczny":
+    "sharp modular geometric sans-serif display type with structured Swiss grid alignment and crisp technical spacing",
+  "Humanistyczny Minimalizm":
+    "warm, approachable minimalist humanist sans-serif typography with generous whitespace and balanced legibility",
+};
+
+const WORKPLACE_ENGLISH_MAP: Record<string, string> = {
+  "Jasne biuro loftowe":
+    "sunlit contemporary European industrial-loft office with tall steel-framed windows, warm brick accents, oak worktables, and indoor plants",
+  "Studio z drewnem i zielenią":
+    "bright Scandinavian-inspired architectural studio with pale oak timber slats, glass meeting rooms, abundant botanical greenery, and soft natural daylight",
+  "Laboratorium R&D ze szkłem":
+    "modern high-craft R&D innovation center with clean glass partitions, brushed aluminum fixtures, minimalist benches, prototyping tools, and crisp daylight",
+  "Skandynawski open-space z tarasem":
+    "airy minimalist modern workspace opening onto a green urban terrace, natural concrete floors, acoustic wood panels, warm afternoon light",
+};
+
+function getGeminiClient(): GoogleGenAI {
+  const apiKey = (
+    import.meta.env.VITE_GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    ""
+  ).trim();
+
+  if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
+    throw new Error(
+      "Brak klucza API. Upewnij się, że w ustawieniach Vercel (Environment Variables) dodałaś zmienną VITE_GEMINI_API_KEY lub GEMINI_API_KEY i zrobiłaś Redeploy."
+    );
+  }
+  return new GoogleGenAI({ apiKey });
+}
 
 function loadSavedHistory(): SavedCampaignSummary[] {
   try {
@@ -79,26 +119,85 @@ export default function App() {
       },
     }));
 
-    const response = await fetch("/api/campaign/image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        medium: params.kind,
-        prompt: params.prompt,
-        aspectRatio: params.aspectRatio,
-        artDirectionLock: params.artDirectionLock,
-        referenceImageBase64: params.referenceImageBase64 || undefined,
-        referenceMimeType: params.referenceMimeType || undefined,
-        refinementNote: params.refinementNote || undefined,
-      }),
-    });
+    try {
+      const ai = getGeminiClient();
+      const parts: Array<
+        { text: string } | { inlineData: { data: string; mimeType: string } }
+      > = [];
 
-    const data = await response.json().catch(() => ({}));
+      let finalPrompt = params.prompt.trim();
+      if (params.artDirectionLock?.trim()) {
+        finalPrompt += `\n\nSTRICT BRAND VISUAL DNA LOCK: ${params.artDirectionLock.trim()}`;
+      }
+      finalPrompt +=
+        "\n\nANTI-STOCK REALISM DIRECTIVE: Depict authentic, diverse contemporary professionals genuinely absorbed in collaborative work in a real modern office. Natural unposed expressions, subtle 35mm documentary depth and daylight, zero cheesy posed camera smiles.";
 
-    if (!response.ok) {
+      if (params.refinementNote?.trim()) {
+        finalPrompt += `\n\nUSER CREATIVE ADJUSTMENT: ${params.refinementNote.trim()}`;
+      }
+
+      if (params.referenceImageBase64 && params.referenceMimeType) {
+        parts.push({
+          inlineData: {
+            data: params.referenceImageBase64,
+            mimeType: params.referenceMimeType,
+          },
+        });
+        finalPrompt =
+          `BRAND COHESION REFERENCE: Preserve the exact brand color palette, graphic identity, typography style, and workplace aesthetic from the attached master visual while adapting it to the new medium (${params.kind}).\n\n` +
+          finalPrompt;
+      }
+
+      parts.push({ text: finalPrompt });
+
+      const response = await ai.models.generateContent({
+        model: IMAGE_MODEL,
+        contents: { parts },
+        config: {
+          imageConfig: {
+            aspectRatio: params.aspectRatio || "4:3",
+          },
+        },
+      });
+
+      let imageUrl: string | null = null;
+      let mimeType = "image/png";
+      let base64Data: string | null = null;
+
+      for (const part of response.candidates?.[0]?.content?.parts ?? []) {
+        if (part.inlineData?.data) {
+          base64Data = part.inlineData.data;
+          mimeType = part.inlineData.mimeType ?? "image/png";
+          imageUrl = `data:${mimeType};base64,${base64Data}`;
+        }
+      }
+
+      if (!imageUrl || !base64Data) {
+        throw new Error(
+          "Model obrazowy nie zwrócił grafiki dla tego ujęcia. Spróbuj ponownie."
+        );
+      }
+
+      setAssets((prev) => ({
+        ...prev,
+        [params.kind]: {
+          ...prev[params.kind],
+          imageUrl,
+          base64Data,
+          mimeType,
+          status: "ready",
+          errorMessage: undefined,
+          prompt: params.prompt,
+          isStarterAsset: false,
+        },
+      }));
+
+      return { imageUrl, base64Data, mimeType };
+    } catch (err) {
       const errMsg =
-        data?.message ||
-        "Nie udało się wygenerować obrazu w modelu Nano-Banana.";
+        err instanceof Error
+          ? err.message
+          : "Nie udało się wygenerować obrazu w modelu AI.";
       setAssets((prev) => ({
         ...prev,
         [params.kind]: {
@@ -109,26 +208,6 @@ export default function App() {
       }));
       throw new Error(errMsg);
     }
-
-    setAssets((prev) => ({
-      ...prev,
-      [params.kind]: {
-        ...prev[params.kind],
-        imageUrl: data.imageUrl,
-        base64Data: data.base64Data,
-        mimeType: data.mimeType,
-        status: "ready",
-        errorMessage: undefined,
-        prompt: params.prompt,
-        isStarterAsset: false,
-      },
-    }));
-
-    return {
-      imageUrl: data.imageUrl as string,
-      base64Data: data.base64Data as string,
-      mimeType: data.mimeType as string,
-    };
   };
 
   const handleGenerateCampaign = async () => {
@@ -137,26 +216,97 @@ export default function App() {
     setGenerationStep("1/4 · Opracowywanie strategii i DNA marki...");
 
     try {
-      // Step 1: Plan coherent campaign strategy, Polish copy & locked art-direction prompts
-      const planRes = await fetch("/api/campaign/plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(brief),
-      });
-      const planData = await planRes.json().catch(() => ({}));
-
-      if (!planRes.ok || !planData?.plan) {
+      if (!brief?.companyName?.trim() || !brief?.description?.trim()) {
         throw new Error(
-          planData?.message ||
-            "Nie udało się przygotować strategii kampanii. Sprawdź klucz API i spróbuj ponownie."
+          "Podaj nazwę firmy oraz opis kultury, propozycji EVP lub stanowiska."
         );
       }
 
-      const nextPlan: CampaignPlan = planData.plan;
+      const ai = getGeminiClient();
+      const modeLabel =
+        brief.mode === "culture"
+          ? "Kultura organizacyjna firmy"
+          : brief.mode === "evp"
+            ? "Propozycja wartości dla pracownika (EVP)"
+            : `Rekrutacja na konkretne stanowisko: ${brief.roleTitle || "Specjalista"}`;
+
+      const typoEng =
+        TYPOGRAPHY_ENGLISH_MAP[brief.typographyStyle] ??
+        TYPOGRAPHY_ENGLISH_MAP["Nowoczesny Grotesk"];
+      const workplaceEng =
+        WORKPLACE_ENGLISH_MAP[brief.workplaceVibe] ??
+        WORKPLACE_ENGLISH_MAP["Studio z drewnem i zielenią"];
+
+      const prompt = `
+Jesteś dyrektorem kreatywnym i strategiem employer brandingu (EB) w topowym europejskim studiu projektowym.
+Przygotuj spójny koncept kampanii employer brandingowej dla polskiej firmy na podstawie briefu:
+
+- Nazwa firmy: ${brief.companyName.trim()}
+- Punkt wyjścia: ${modeLabel}
+${brief.roleTitle ? `- Stanowisko: ${brief.roleTitle.trim()}` : ""}
+- Opis kultury / EVP / stanowiska: ${brief.description.trim()}
+- Główny kolor marki (HEX): ${brief.primaryColor}
+- Kolor uzupełniający / akcent (HEX): ${brief.secondaryColor}
+- Styl typografii: ${brief.typographyStyle} (${typoEng})
+- Klimat miejsca pracy: ${brief.workplaceVibe} (${workplaceEng})
+${brief.customHeadline?.trim() ? `- Preferowane hasło użytkownika (użyj go jako headline): ${brief.customHeadline.trim()}` : "- Brak narzuconego hasła — stwórz krótkie, autentyczne polskie hasło (maks. 5 słów), zero korporacyjnych klisz typu 'dynamiczny zespół'."}
+
+ZASADY KRYTYCZNE DLA SPÓJNOŚCI WIZUALNEJ:
+1. Wszystkie 3 prompty obrazowe (linkedin, billboard, officeBanner) MUSZĄ być napisane po ANGIELSKU, ale cytowane napisy na kreacjach (nazwa firmy "${brief.companyName.trim()}", hasło główne, powitanie w biurze) MUSZĄ być dokładnie po POLSKU z poprawnymi polskimi znakami.
+2. Wszystkie 3 obrazy muszą wyglądać jak jedna kampania tej samej marki: paleta ${brief.primaryColor} i ${brief.secondaryColor}, styl typografii ${typoEng}, klimat ${workplaceEng}, autentyczna fotografia dokumentalna 35mm, naturalne światło dzienne, zróżnicowani profesjonaliści przy prawdziwej pracy, zero sztucznych póz stockowych.
+3. Specyfika mediów:
+  - "linkedin": Editorial recruitment campaign graphic (4:3) for LinkedIn feed with brand framing in ${brief.primaryColor}, displaying "${brief.companyName.trim()}" and Polish headline.
+  - "billboard": Wide architectural street-level photograph (16:9) of a modern urban city billboard along a sunlit European boulevard displaying the cohesive campaign creative.
+  - "officeBanner": Architectural interior photograph (3:4) of a sunlit modern reception lobby featuring a tall freestanding welcome banner displaying "${brief.companyName.trim()}" and Polish welcome message.
+4. Post na LinkedIn ("linkedinPost") napisz po polsku: konkretny, ludzki, z 3 krótkimi akapitami, wyraźnym CTA i 4 trafnymi hashtagami.
+`;
+
+      const planResponse = await ai.models.generateContent({
+        model: PLAN_MODEL,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              headline: { type: Type.STRING },
+              subheadline: { type: Type.STRING },
+              welcomeMessage: { type: Type.STRING },
+              linkedinPost: { type: Type.STRING },
+              brandVoiceSummary: { type: Type.STRING },
+              artDirectionLock: { type: Type.STRING },
+              prompts: {
+                type: Type.OBJECT,
+                properties: {
+                  linkedin: { type: Type.STRING },
+                  billboard: { type: Type.STRING },
+                  officeBanner: { type: Type.STRING },
+                },
+                required: ["linkedin", "billboard", "officeBanner"],
+              },
+            },
+            required: [
+              "headline",
+              "subheadline",
+              "welcomeMessage",
+              "linkedinPost",
+              "brandVoiceSummary",
+              "artDirectionLock",
+              "prompts",
+            ],
+          },
+        },
+      });
+
+      const rawText = (planResponse.text ?? "").trim();
+      if (!rawText) {
+        throw new Error("Model nie zwrócił planu kampanii. Spróbuj ponownie.");
+      }
+
+      const nextPlan: CampaignPlan = JSON.parse(rawText);
       setPlan(nextPlan);
       setIsStarterPreview(false);
 
-      // Save campaign brief & strategy to history
       const record: SavedCampaignSummary = {
         id: `${Date.now()}`,
         createdAt: new Date().toLocaleDateString("pl-PL", {
@@ -170,7 +320,6 @@ export default function App() {
       };
       setSavedCampaigns((prev) => [record, ...prev].slice(0, 6));
 
-      // Mark all 3 media slots as generating
       setAssets((prev) => ({
         linkedin: {
           ...prev.linkedin,
@@ -192,7 +341,6 @@ export default function App() {
         },
       }));
 
-      // Step 2: Generate LinkedIn key visual first with Nano-Banana (anchors brand visual cohesion!)
       setGenerationStep("2/4 · Nano-Banana: post na LinkedIn...");
       let anchorRef: { base64Data: string; mimeType: string } | null = null;
       try {
@@ -207,7 +355,6 @@ export default function App() {
           mimeType: linkedinResult.mimeType,
         };
       } catch (err) {
-        // Record error on LinkedIn card and stop remaining calls if it's an API key/quota error
         const msg = err instanceof Error ? err.message : String(err);
         setGlobalError(msg);
         setAssets((prev) => ({
@@ -226,7 +373,6 @@ export default function App() {
         return;
       }
 
-      // Step 3: Generate Urban City Billboard anchored to LinkedIn key visual
       setGenerationStep("3/4 · Nano-Banana: billboard miejski...");
       try {
         await requestMediumImage({
@@ -241,7 +387,6 @@ export default function App() {
         setGlobalError(err instanceof Error ? err.message : String(err));
       }
 
-      // Step 4: Generate Modern Office Welcome Banner anchored to LinkedIn key visual
       setGenerationStep("4/4 · Nano-Banana: baner powitalny w biurze...");
       try {
         await requestMediumImage({
@@ -273,8 +418,6 @@ export default function App() {
   ) => {
     setGlobalError(null);
     const targetAsset = assets[kind];
-
-    // If regenerating billboard or officeBanner, pass LinkedIn image as consistency reference if available in memory
     const anchorAsset =
       kind !== "linkedin" && assets.linkedin.base64Data
         ? assets.linkedin
@@ -381,7 +524,6 @@ export default function App() {
       <TopBar onNewCampaign={handleNewCampaign} />
 
       <main className="flex-1 max-w-[1380px] w-full mx-auto px-6 lg:px-10 py-8 lg:py-10 space-y-10">
-        {/* Compact Editorial Header */}
         <section className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-2">
           <div className="max-w-2xl">
             <p className="text-xs font-medium text-[#5B6472] mb-2">
@@ -399,7 +541,6 @@ export default function App() {
             </p>
           </div>
 
-          {/* Quick Scenario Selector Strip */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <span className="text-xs text-[#5B6472] mr-1">
               Wczytaj brief:
@@ -424,7 +565,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* Actionable Error Alert Banner (transparent propagation, zero silent mocks) */}
         {globalError && (
           <div
             role="alert"
@@ -450,7 +590,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Primary 2-Column Studio Workspace */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-7 items-start">
           <div className="lg:col-span-4 lg:sticky lg:top-22">
             <BriefPanel
@@ -480,7 +619,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Curated Scenarios & Saved Drafts */}
         <section
           id="przyklady"
           aria-labelledby="examples-heading"
@@ -558,7 +696,6 @@ export default function App() {
             ))}
           </div>
 
-          {/* Saved User Campaigns History */}
           {savedCampaigns.length > 0 && (
             <div className="mt-8 pt-6 border-t border-[#E2E6EC]">
               <h3 className="text-sm font-bold text-[#111318] mb-3">
