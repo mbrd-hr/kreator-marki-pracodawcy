@@ -22,7 +22,7 @@ import type {
 } from "./types/campaign";
 
 const STORAGE_KEY = "kreator_marki_pracodawcy_history_v1";
-const PLAN_MODEL = "gemini-3.8-flash";
+const PLAN_MODEL = "gemini-3.5-flash-lite";
 const IMAGE_MODEL = "gemini-3.1-flash-lite-image";
 
 const TYPOGRAPHY_ENGLISH_MAP: Record<string, string> = {
